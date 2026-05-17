@@ -183,7 +183,7 @@ Yêu cầu:
 PromptTemplate.register("compliance_analysis", """Bạn là luật sư phân tích tuân thủ pháp luật cho hợp đồng.
 
 Nhiệm vụ: Phân tích CHI TIẾT điều khoản hợp đồng so với quy định pháp luật được cung cấp.
-BẮT BUỘC trả về kết quả cho MỌI điều khoản — kể cả compliant — với trích dẫn luật để người dùng đọc.
+BẮT BUỘC trả về kết quả cho MỌI điều khoản, nhưng CHỈ dựa trên quy định pháp luật thật sự liên quan trực tiếp.
 
 Contract clause:
 {{clause_text}}
@@ -222,6 +222,13 @@ Trả về duy nhất một JSON object với schema:
 
 Hướng dẫn phân tích BẮT BUỘC:
 
+0. GUARDRAIL VỀ CĂN CỨ PHÁP LÝ:
+   - Chỉ dùng Matched legal provisions nếu nội dung văn bản trực tiếp điều chỉnh điều khoản hợp đồng đang xét.
+   - Không được dùng điều luật lao động để đánh giá điều khoản thuê nhà, mua bán, dân sự hoặc chủ đề khác nếu điều luật đó không trực tiếp áp dụng.
+   - Không được suy diễn vi phạm chỉ vì có matched provision được cung cấp.
+   - Nếu tất cả matched provisions không liên quan hoặc không đủ căn cứ: trả về compliance_status="partially_compliant", summary nêu "Không đủ căn cứ pháp lý trực tiếp từ dữ liệu truy xuất để kết luận", violations=[], risks=[], suggestions=[], citations=[].
+   - Không được bịa citation, không được dùng uid ngoài danh sách Matched legal provisions.
+
 1. COMPLIANCE_STATUS:
    - "compliant": Điều khoản tuân thủ đầy đủ pháp luật
    - "non_compliant": Điều khoản vi phạm pháp luật
@@ -247,8 +254,9 @@ Hướng dẫn phân tích BẮT BUỘC:
    - Ví dụ: "Bổ sung quy định về thời gian nghỉ giữa giờ theo Điều 108 BLLĐ"
    - Nếu không có đề xuất, trả về []
 
-6. CITATIONS (BẮT BUỘC, không được để trống):
-   - TRẢ VỀ TẤT CẢ matched provisions có liên quan để người dùng đọc
+6. CITATIONS:
+   - Chỉ trả về matched provisions có liên quan trực tiếp để người dùng đọc
+   - Không trả về citation nếu matched provision không trực tiếp áp dụng cho điều khoản
    - Chỉ dùng uid từ Matched legal provisions
    - display_text phải chính xác theo văn bản pháp luật
    - Đây là phần QUAN TRỌNG NHẤT — người dùng cần đọc luật để hiểu căn cứ
@@ -256,6 +264,63 @@ Hướng dẫn phân tích BẮT BUỘC:
 7. Không trả về markdown, không giải thích thêm.
 
 Chỉ trả về JSON object.
+""")
+
+PromptTemplate.register("contract_clause_compliance_analysis", """Bạn là luật sư rà soát tuân thủ pháp luật lao động Việt Nam cho từng điều khoản hợp đồng.
+
+Nhiệm vụ: phân tích điều khoản hợp đồng dựa DUY NHẤT trên các quy định pháp luật đã truy xuất.
+
+Clause type:
+{{clause_type}}
+
+Contract clause:
+{{clause_text}}
+
+Retrieved legal provisions:
+{{retrieved_provisions}}
+
+Effective text:
+{{effective_text}}
+
+Amendment / validity context:
+{{amendment_history}}
+
+Trả về duy nhất một JSON object với schema:
+{
+  "compliance_status": "compliant | non_compliant | partially_compliant",
+  "summary": "tóm tắt ngắn gọn bằng tiếng Việt",
+  "violations": [
+    {
+      "clause": "tên hoặc loại điều khoản",
+      "description": "mô tả ngắn gọn vi phạm",
+      "citation": "trích dẫn pháp lý dễ đọc",
+      "severity": "low | medium | high"
+    }
+  ],
+  "risks": ["rủi ro pháp lý tiềm ẩn"],
+  "suggestions": ["đề xuất sửa đổi cụ thể"],
+  "citations": [
+    {
+      "display_text": "Điều/Khoản/Điểm + tên văn bản",
+      "uid": "uid từ Retrieved legal provisions",
+      "document_title": "tên văn bản",
+      "article": "số điều hoặc null",
+      "clause": "số khoản hoặc null",
+      "point": "ký hiệu điểm hoặc null"
+    }
+  ]
+}
+
+Quy tắc bắt buộc:
+- Chỉ dùng quy định có trong Retrieved legal provisions.
+- Chỉ cite provision trực tiếp liên quan đến điều khoản đang xét.
+- Không dùng uid ngoài Retrieved legal provisions.
+- Không được suy diễn vi phạm nếu quy định truy xuất không trực tiếp điều chỉnh điều khoản.
+- Với điều khoản tiền lương, phải kiểm tra riêng: mức lương tối thiểu vùng, nguyên tắc trả lương đầy đủ đúng hạn, giới hạn chậm trả lương, và nghĩa vụ trả thêm tiền lãi/đền bù nếu trả lương chậm theo quy định được truy xuất.
+- Nếu hợp đồng cho phép chậm lương dài hơn giới hạn pháp luật hoặc miễn trả lãi khi pháp luật yêu cầu trả lãi, phải đánh giá là non_compliant nếu Retrieved legal provisions có căn cứ trực tiếp.
+- Nếu không đủ căn cứ pháp lý trực tiếp: trả compliance_status="partially_compliant", summary="Không đủ căn cứ pháp lý trực tiếp từ dữ liệu truy xuất để kết luận.", violations=[], risks=[], suggestions=[], citations=[].
+- Nếu có vi phạm, mô tả ngắn, cụ thể, và severity phải là low, medium hoặc high.
+- Không trả markdown, không giải thích ngoài JSON.
 """)
 
 # ---------------------------------------------------------------------------
@@ -304,4 +369,26 @@ Quy tắc:
 - Chỉ dùng citation uid xuất hiện trong Retrieved provisions.
 - Nếu validity không chắc chắn, nói rõ là dữ liệu quan hệ chưa đủ để kết luận chắc chắn.
 - Không trả về markdown hoặc giải thích ngoài JSON.
+""")
+
+PromptTemplate.register("answer_generation_stream", """Trả lời câu hỏi pháp lý sau dựa trên thông tin đã truy xuất.
+
+Question:
+{{question}}
+
+Retrieved provisions:
+{{retrieved_provisions}}
+
+Effective text:
+{{effective_text}}
+
+Amendment history:
+{{amendment_history}}
+
+Yêu cầu:
+- Chỉ trả lời bằng tiếng Việt tự nhiên, ngắn gọn, rõ ràng.
+- Không trả về JSON.
+- Không dùng markdown.
+- Không liệt kê metadata hay cấu trúc máy đọc.
+- Có thể nhắc tới Điều/Khoản/Điểm nếu cần, nhưng vẫn phải là văn phong tự nhiên.
 """)

@@ -162,6 +162,39 @@ class QARetrievalService:
         candidates = await retriever.retrieve(plan)
         return [self._candidate_to_provision(candidate, sub_query.retrieval_strategy) for candidate in candidates]
 
+    async def retrieve_plan(self, plan: LegalRetrievalPlan, strategy: str = "hybrid_search") -> QARetrievalResult:
+        """Run QA-style retrieval from an explicit legal retrieval plan."""
+        retriever = self._hybrid_retriever or LegalHybridRetriever(return_top_n=self._return_top_n)
+        candidates = await retriever.retrieve(plan)
+        provisions = [self._candidate_to_provision(candidate, strategy) for candidate in candidates]
+        provisions = self._dedupe_and_rank(provisions)
+        return QARetrievalResult(
+            query=plan.original_text,
+            sub_queries=[
+                SubQuery(
+                    intent=plan.risk_type.upper() or "SCENARIO",
+                    query=plan.legal_issue or plan.original_text,
+                    retrieval_strategy=strategy,
+                    requires=["legal_provision", "effective_text", "contract_context"],
+                )
+            ],
+            provisions=provisions,
+            retrieval_status="ok" if provisions else "no_results",
+            errors=[],
+            rewritten_queries={plan.original_text: plan.legal_issue or plan.original_text},
+            query_debug={
+                plan.original_text: {
+                    "strategy": strategy,
+                    "source": plan.source,
+                    "search_queries": list(plan.search_queries),
+                    "keywords": list(plan.keywords),
+                    "expected_domains": list(plan.expected_domains),
+                    "title_hints": list(plan.title_hints),
+                    "risk_type": plan.risk_type,
+                }
+            },
+        )
+
     async def _direct_lookup(self, sub_query: SubQuery) -> tuple[list[QARetrievedProvision], dict[str, Any]]:
         reference = await self._resolve_direct_reference(sub_query.query)
         debug = self._direct_lookup_debug(sub_query.query, reference)

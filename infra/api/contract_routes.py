@@ -257,6 +257,12 @@ async def process_contract(
 ):
     """Process a contract file asynchronously and persist results."""
     store = get_contract_store()
+    progress_state = {"value": 0}
+
+    async def report_progress(status: str, progress: int) -> None:
+        progress_state["value"] = max(progress_state["value"], max(0, min(100, progress)))
+        store.update_run(run_id=run_id, user_id=user_id, status=status, progress=progress_state["value"])
+
     try:
         if os.getenv("CONTRACT_REVIEW_USE_MOCK", "").lower() in {"1", "true", "yes"}:
             await process_contract_mock(run_id=run_id, version_id=version_id, document_id=document_id, user_id=user_id)
@@ -267,8 +273,8 @@ async def process_contract(
             tmp.write(content)
             tmp_path = tmp.name
 
-        store.update_run(run_id=run_id, user_id=user_id, status="parsing", progress=15)
-        pipeline = ContractReviewPipeline()
+        await report_progress("uploading", 10)
+        pipeline = ContractReviewPipeline(progress_callback=report_progress)
         result = await pipeline.review_file(tmp_path)
         payload = serialize_review_result(result)
         store.save_snapshot(run_id=run_id, user_id=user_id, result_json=payload)
@@ -276,13 +282,14 @@ async def process_contract(
     except ContractReviewPipelineError as exc:
         logger.error("Run %s failed at %s: %s", run_id, exc.stage, exc)
         try:
-            store.update_run(run_id=run_id, user_id=user_id, status="failed", progress=0, error=str(exc), completed=True)
+            failed_progress = 100 if exc.stage == "guardrail" else progress_state["value"]
+            store.update_run(run_id=run_id, user_id=user_id, status="failed", progress=failed_progress, error=str(exc), completed=True)
         except ContractStoreError:
             logger.exception("Could not persist failed status for run %s", run_id)
     except Exception as exc:  # noqa: BLE001
         logger.error("Run %s failed: %s", run_id, exc)
         try:
-            store.update_run(run_id=run_id, user_id=user_id, status="failed", progress=0, error=str(exc), completed=True)
+            store.update_run(run_id=run_id, user_id=user_id, status="failed", progress=progress_state["value"], error=str(exc), completed=True)
         except ContractStoreError:
             logger.exception("Could not persist failed status for run %s", run_id)
 
@@ -342,12 +349,14 @@ def serialize_review_result(result) -> dict[str, Any]:
             matches.append(
                 {
                     "clauseId": item.clause.id,
-                    "uid": match.segment_uid or match.article_uid,
+                    "uid": match.uid,
                     "citation": match.display_citation,
                     "documentTitle": match.document_title,
                     "segmentType": match.segment_type,
-                    "score": match.combined_score,
-                    "validitySignal": match.validity_signal,
+                    "text": repair_mojibake_text(match.effective_text or match.text or ""),
+                    "score": display_match_score(match),
+                    "rankingScore": match.score,
+                    "validitySignal": match.validity.status,
                     "scoreFactors": match.score_factors,
                 }
             )
@@ -394,28 +403,52 @@ def serialize_review_result(result) -> dict[str, Any]:
     }
 
 
+def display_match_score(match) -> float:
+    """Return a UI-safe relevance score in 0..1, excluding ranking boosts."""
+    factors = match.score_factors if isinstance(match.score_factors, dict) else {}
+
+    def factor(name: str) -> float:
+        try:
+            return float(factors.get(name, 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    base_relevance = max(factor("vector"), factor("lexical")) + factor("exact") + factor("title")
+    if base_relevance <= 0:
+        base_relevance = float(getattr(match, "score", 0.0) or 0.0)
+    return max(0.0, min(1.0, base_relevance))
+
+
 async def process_contract_mock(*, run_id: str, version_id: str, document_id: str, user_id: str):
     store = get_contract_store()
-    store.update_run(run_id=run_id, user_id=user_id, status="parsing", progress=20)
+    store.update_run(run_id=run_id, user_id=user_id, status="uploading", progress=10)
     await asyncio.sleep(0.1)
-    store.update_run(run_id=run_id, user_id=user_id, status="analyzing", progress=80)
+    store.update_run(run_id=run_id, user_id=user_id, status="parsing", progress=25)
+    await asyncio.sleep(0.1)
+    store.update_run(run_id=run_id, user_id=user_id, status="extracting", progress=40)
+    await asyncio.sleep(0.1)
+    store.update_run(run_id=run_id, user_id=user_id, status="retrieving", progress=65)
+    await asyncio.sleep(0.1)
+    store.update_run(run_id=run_id, user_id=user_id, status="analyzing", progress=85)
+    await asyncio.sleep(0.1)
+    store.update_run(run_id=run_id, user_id=user_id, status="verifying", progress=95)
     await asyncio.sleep(0.1)
     payload = {
         "clauses": [
-            {"id": "c1", "type": "Thanh toán", "text": "Giá thuê: 50.000.000 VNĐ/tháng", "riskLevel": "low"},
-            {"id": "c2", "type": "Phạt vi phạm", "text": "Phạt 30% giá trị hợp đồng", "riskLevel": "high"},
+            {"id": "c1", "type": "Tiền lương", "text": "Người lao động được trả lương 10.000.000 VNĐ/tháng.", "riskLevel": "low"},
+            {"id": "c2", "type": "Kỷ luật lao động", "text": "Người lao động bị phạt 01 tháng lương nếu vi phạm nội quy.", "riskLevel": "high"},
         ],
         "compliance": {
             "violations": [
                 {
-                    "clause": "Phạt vi phạm",
-                    "description": "Mức phạt 30% vượt quá 8% theo Luật Thương mại",
-                    "citation": "Điều 301 Luật Thương mại 2005",
+                    "clause": "Kỷ luật lao động",
+                    "description": "Điều khoản phạt tiền người lao động có dấu hiệu vi phạm quy định về kỷ luật lao động.",
+                    "citation": "Điều 127 Bộ luật Lao động",
                     "verified": True,
                 }
             ],
-            "risks": ["Mức phạt quá cao có thể bị tòa án tuyên vô hiệu"],
-            "suggestions": ["Giảm mức phạt xuống tối đa 8% giá trị phần nghĩa vụ bị vi phạm"],
+            "risks": ["Điều khoản xử lý kỷ luật bằng phạt tiền có rủi ro cao."],
+            "suggestions": ["Thay thế bằng hình thức xử lý kỷ luật lao động phù hợp Bộ luật Lao động."],
             "citations": [],
             "clauseResults": [],
         },

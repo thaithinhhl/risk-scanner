@@ -7,12 +7,13 @@ Abstract LLMClient with configurable providers:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import os
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, AsyncIterator, Optional
 
 from dotenv import load_dotenv
 
@@ -44,6 +45,15 @@ class LLMClient(ABC):
         schema: Optional[dict[str, Any]] = None,
         temperature: float = 0.0,
     ) -> dict[str, Any]:
+        pass
+
+    @abstractmethod
+    async def chat_stream(
+        self,
+        prompt: str,
+        schema: Optional[dict[str, Any]] = None,
+        temperature: float = 0.0,
+    ) -> AsyncIterator[str]:
         pass
 
     @abstractmethod
@@ -146,6 +156,60 @@ class OpenAIClient(LLMClient):
 
                 delay = RETRY_BASE_DELAY * (RETRY_BACKOFF ** attempt)
                 logger.warning(f"LLM call failed (attempt {attempt + 1}/{MAX_RETRIES}), retrying in {delay}s: {e}")
+                await asyncio.sleep(delay)
+
+        raise last_error  # Should never reach here
+
+    async def chat_stream(
+        self,
+        prompt: str,
+        schema: Optional[dict[str, Any]] = None,
+        temperature: float = 0.0,
+    ) -> AsyncIterator[str]:
+        client = self._get_client()
+        messages = [{"role": "user", "content": prompt}]
+
+        kwargs = {
+            "model": self._model,
+            "messages": messages,
+            "temperature": temperature,
+            "stream": True,
+        }
+
+        last_error = None
+        for attempt in range(MAX_RETRIES):
+            emitted_any = False
+            try:
+                logger.info(
+                    "LLM stream start model=%s prompt_chars=%d schema=%s temperature=%.2f attempt=%d",
+                    self._model,
+                    len(prompt),
+                    bool(schema),
+                    temperature,
+                    attempt + 1,
+                )
+                stream = client.chat.completions.create(**kwargs)
+                if inspect.isawaitable(stream):
+                    stream = await stream
+                async for event in stream:
+                    delta = ""
+                    choice = event.choices[0] if event.choices else None
+                    if choice and choice.delta and choice.delta.content:
+                        delta = choice.delta.content
+                    if delta:
+                        emitted_any = True
+                        yield delta
+                return
+            except Exception as e:
+                last_error = e
+                error_str = str(e).lower()
+                is_retryable = any(err in error_str for err in RETRYABLE_ERRORS)
+                if emitted_any or not is_retryable or attempt == MAX_RETRIES - 1:
+                    logger.error("LLM stream failed after %d attempts: %s", attempt + 1, e)
+                    raise
+
+                delay = RETRY_BASE_DELAY * (RETRY_BACKOFF ** attempt)
+                logger.warning("LLM stream failed (attempt %d/%d), retrying in %ss: %s", attempt + 1, MAX_RETRIES, delay, e)
                 await asyncio.sleep(delay)
 
         raise last_error  # Should never reach here

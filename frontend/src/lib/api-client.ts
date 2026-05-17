@@ -117,7 +117,16 @@ export async function apiRequest<T>(
         } as ApiError;
       }
 
-      return await response.json();
+      if (response.status === 204 || response.status === 205) {
+        return undefined as T;
+      }
+
+      const text = await response.text();
+      if (!text) {
+        return undefined as T;
+      }
+
+      return JSON.parse(text) as T;
     } catch (error) {
       lastError = error as ApiError;
       if (attempt < retries) {

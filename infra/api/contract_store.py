@@ -306,6 +306,19 @@ class ContractStore:
         )
         return rows[0] if rows else None
 
+    def get_document_any_state(self, document_id: str, user_id: str) -> Optional[dict[str, Any]]:
+        rows = self._request(
+            "GET",
+            "contract_documents",
+            params={
+                "select": "*",
+                "id": f"eq.{document_id}",
+                "user_id": f"eq.{user_id}",
+                "limit": "1",
+            },
+        )
+        return rows[0] if rows else None
+
     def get_version(self, version_id: str, user_id: str) -> Optional[dict[str, Any]]:
         rows = self._request(
             "GET",
@@ -338,7 +351,7 @@ class ContractStore:
             "snapshot": snapshot,
         }
 
-    def list_runs(self, user_id: str) -> list[dict[str, Any]]:
+    def list_runs(self, user_id: str, limit: int = 25) -> list[dict[str, Any]]:
         runs = self._request(
             "GET",
             "contract_review_runs",
@@ -347,28 +360,83 @@ class ContractStore:
                 "user_id": f"eq.{user_id}",
                 "deleted_at": "is.null",
                 "order": "created_at.desc",
+                "limit": str(limit),
             },
         )
+        if not runs:
+            return []
+
+        document_ids = self._dedupe_ids(run.get("document_id") for run in runs)
+        version_ids = self._dedupe_ids(run.get("version_id") for run in runs)
+        documents = self._request(
+            "GET",
+            "contract_documents",
+            params={
+                "select": "*",
+                "user_id": f"eq.{user_id}",
+                "deleted_at": "is.null",
+                "id": f"in.({','.join(document_ids)})",
+            },
+        ) if document_ids else []
+        versions = self._request(
+            "GET",
+            "contract_document_versions",
+            params={
+                "select": "*",
+                "user_id": f"eq.{user_id}",
+                "deleted_at": "is.null",
+                "id": f"in.({','.join(version_ids)})",
+            },
+        ) if version_ids else []
+        documents_by_id = {document["id"]: document for document in documents or []}
+        versions_by_id = {version["id"]: version for version in versions or []}
+
         bundles: list[dict[str, Any]] = []
         for run in runs:
-            document = self.get_document(run["document_id"], user_id)
+            document = documents_by_id.get(run["document_id"])
             if not document:
                 continue
-            version = self.get_version(run["version_id"], user_id)
+            version = versions_by_id.get(run["version_id"])
             if not version:
                 continue
             bundles.append({"run": run, "document": document, "version": version})
         return bundles
 
+    def _dedupe_ids(self, values) -> list[str]:
+        seen: set[str] = set()
+        ids: list[str] = []
+        for value in values:
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            ids.append(str(value))
+        return ids
+
     def soft_delete_document(self, document_id: str, user_id: str) -> None:
-        document = self.get_document(document_id, user_id)
+        document = self.get_document_any_state(document_id, user_id)
         if not document:
             raise ContractStoreError("Document not found")
+        if document.get("deleted_at"):
+            return
         now = datetime.now(timezone.utc).isoformat()
         self._request(
             "PATCH",
             "contract_documents",
             params={"id": f"eq.{document_id}", "user_id": f"eq.{user_id}", "deleted_at": "is.null"},
+            json={"deleted_at": now},
+            prefer="return=minimal",
+        )
+        self._request(
+            "PATCH",
+            "contract_document_versions",
+            params={"document_id": f"eq.{document_id}", "user_id": f"eq.{user_id}", "deleted_at": "is.null"},
+            json={"deleted_at": now},
+            prefer="return=minimal",
+        )
+        self._request(
+            "PATCH",
+            "contract_review_runs",
+            params={"document_id": f"eq.{document_id}", "user_id": f"eq.{user_id}", "deleted_at": "is.null"},
             json={"deleted_at": now},
             prefer="return=minimal",
         )

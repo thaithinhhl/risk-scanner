@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Optional
+from typing import Any, AsyncIterator, Optional
 
 from .client import LLMClient
 
@@ -386,6 +386,17 @@ class MockLLMProvider(LLMClient):
 
         response_key = self._classify_query(query)
         return self.INTENT_RESPONSES.get(response_key, self.FALLBACK_RESPONSE)
+
+    async def chat_stream(
+        self,
+        prompt: str,
+        schema: Optional[dict] = None,
+        temperature: float = 0.0,
+    ) -> AsyncIterator[str]:
+        response = await self.chat(prompt, schema=schema, temperature=temperature)
+        content = json.dumps(response, ensure_ascii=False)
+        for index in range(0, len(content), 16):
+            yield content[index : index + 16]
 
     async def extract(self, text: str, schema: dict) -> dict:
         """Mock structured extraction."""

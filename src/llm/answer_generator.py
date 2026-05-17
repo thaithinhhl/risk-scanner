@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Optional
+from typing import Any, AsyncIterator, Optional
 
 from src.llm.client import LLMClient, create_client
 from src.llm.models import IntentClassification
@@ -61,6 +61,20 @@ class QAAnswerGenerator:
                     )
 
         raise RuntimeError("Unreachable answer generation state")
+
+    async def stream_answer(
+        self,
+        question: str,
+        classification: IntentClassification,
+        retrieval: QARetrievalResult,
+    ) -> AsyncIterator[str]:
+        prompt = self._build_stream_prompt(question, retrieval)
+        if not retrieval.provisions:
+            yield self.no_result_answer(classification, retrieval).answer
+            return
+
+        async for chunk in self._llm.chat_stream(prompt, temperature=0.0):
+            yield chunk
 
     def no_result_answer(
         self,
@@ -130,6 +144,27 @@ class QAAnswerGenerator:
         ]
 
         return PromptTemplate("answer_generation").render(
+            question=question,
+            retrieved_provisions=json.dumps(provision_dicts, ensure_ascii=False),
+            effective_text=effective_text,
+            amendment_history=json.dumps(amendment_history, ensure_ascii=False),
+        )
+
+    def _build_stream_prompt(self, question: str, retrieval: QARetrievalResult) -> str:
+        provision_dicts = [provision.to_dict() for provision in retrieval.provisions]
+        effective_text = "\n\n".join(
+            provision.effective_text or provision.text for provision in retrieval.provisions if provision.effective_text or provision.text
+        )
+        amendment_history = [
+            {
+                "uid": provision.uid,
+                "modifies_context": provision.modifies_context,
+                "validity": provision.validity.to_dict(),
+            }
+            for provision in retrieval.provisions
+        ]
+
+        return PromptTemplate("answer_generation_stream").render(
             question=question,
             retrieved_provisions=json.dumps(provision_dicts, ensure_ascii=False),
             effective_text=effective_text,

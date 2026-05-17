@@ -12,6 +12,7 @@ import { Send, Plus, MessageSquare } from "lucide-react";
 
 export default function LegalQAPage() {
   const searchParams = useSearchParams();
+  const [mounted, setMounted] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [tabId, setTabId] = useState<string>("");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -24,9 +25,10 @@ export default function LegalQAPage() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streamingContent]);
+  }, [messages, streamingContent, isStreaming]);
 
   useEffect(() => {
+    setMounted(true);
     const currentTabId = getLegalQaTabId();
     setTabId(currentTabId);
 
@@ -67,7 +69,7 @@ export default function LegalQAPage() {
   };
 
   const handleSend = async () => {
-    if (!input.trim() || isStreaming || !tabId) return;
+    if (!mounted || !input.trim() || isStreaming || !tabId) return;
 
     const userMessage: Message = {
       id: `msg_${Date.now()}`,
@@ -140,7 +142,7 @@ export default function LegalQAPage() {
             <MessageSquare className="w-6 h-6 text-secondary" strokeWidth={2.5} />
             <h1 className="font-heading text-3xl text-fg">Hỏi đáp pháp lý</h1>
           </div>
-          <WobblyButton variant="secondary" size="sm" onClick={handleNewConversation} disabled={isStreaming}>
+          <WobblyButton variant="secondary" size="sm" onClick={handleNewConversation} disabled={mounted ? isStreaming : undefined}>
             <Plus className="w-4 h-4 mr-2" />
             Mới
           </WobblyButton>
@@ -176,12 +178,12 @@ export default function LegalQAPage() {
               {messages.map((msg) => (
                 <ChatBubble key={msg.id} message={msg} />
               ))}
-              {isStreaming && streamingContent && (
+              {isStreaming && (
                 <ChatBubble
                   message={{
                     id: "streaming",
                     role: "assistant",
-                    content: streamingContent,
+                    content: streamingContent || "Đang trả lời...",
                     timestamp: new Date().toISOString(),
                     intents: streamingIntents,
                     provisions: streamingProvisions,
@@ -203,9 +205,9 @@ export default function LegalQAPage() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
-            disabled={isStreaming}
+            disabled={mounted ? isStreaming : undefined}
           />
-          <WobblyButton onClick={handleSend} disabled={isStreaming || !input.trim() || !tabId}>
+          <WobblyButton onClick={handleSend} disabled={mounted ? (isStreaming || !input.trim() || !tabId) : undefined}>
             <Send className="w-5 h-5" />
           </WobblyButton>
         </div>

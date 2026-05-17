@@ -38,8 +38,10 @@ export interface LegalMatch {
   documentTitle: string;
   segmentType: string;
   score: number;
+  rankingScore?: number;
   validitySignal: string;
   scoreFactors: Record<string, number>;
+  text?: string;
 }
 
 export interface CitationResult {
@@ -112,26 +114,34 @@ export async function getJobStatus(jobId: string): Promise<ContractJob> {
   };
 }
 
-export async function getJobHistory(): Promise<ContractJob[]> {
-  const jobs = await apiRequest<JobStatusResponse[]>("/api/contracts/history");
+let jobHistoryRequest: Promise<ContractJob[]> | null = null;
 
-  return jobs.map((job) => ({
-    id: job.jobId,
-    documentId: job.documentId,
-    versionId: job.versionId,
-    filename: job.filename,
-    status: job.status,
-    progress: job.progress,
-    createdAt: job.createdAt,
-    fileUrl: job.fileUrl,
-    previewText: job.previewText,
-    sourceFormat: job.sourceFormat,
-    clauses: job.clauses,
-    matches: job.matches,
-    compliance: job.compliance,
-    citations: job.citations,
-    error: job.error,
-  }));
+export async function getJobHistory(): Promise<ContractJob[]> {
+  if (jobHistoryRequest) return jobHistoryRequest;
+
+  jobHistoryRequest = apiRequest<JobStatusResponse[]>("/api/contracts/history", {}, { timeout: 60000 })
+    .then((jobs) => jobs.map((job) => ({
+      id: job.jobId,
+      documentId: job.documentId,
+      versionId: job.versionId,
+      filename: job.filename,
+      status: job.status,
+      progress: job.progress,
+      createdAt: job.createdAt,
+      fileUrl: job.fileUrl,
+      previewText: job.previewText,
+      sourceFormat: job.sourceFormat,
+      clauses: job.clauses,
+      matches: job.matches,
+      compliance: job.compliance,
+      citations: job.citations,
+      error: job.error,
+    })))
+    .finally(() => {
+      jobHistoryRequest = null;
+    });
+
+  return jobHistoryRequest;
 }
 
 export async function deleteDocument(documentId: string): Promise<void> {

@@ -62,13 +62,17 @@ interface LegalPoint {
 import { contractApi } from "@/lib/api-contract";
 import type { CitationResult, ContractJob, LegalMatch } from "@/lib/api-contract";
 
+type AnalyzeStatus = ContractJob["status"];
+
 const analyzeSteps = [
-  { label: "Đang tải lên tài liệu", threshold: 20 },
-  { label: "Đang đọc và trích xuất nội dung", threshold: 45 },
-  { label: "Đang phân tích điều khoản", threshold: 70 },
-  { label: "Đang đối chiếu pháp luật", threshold: 90 },
-  { label: "Hoàn thành", threshold: 100 },
-];
+  { status: "uploading", label: "Đang tải lên tài liệu" },
+  { status: "parsing", label: "Đang đọc và trích xuất nội dung" },
+  { status: "extracting", label: "Đang phân tích điều khoản" },
+  { status: "retrieving", label: "Đang đối chiếu pháp luật" },
+  { status: "analyzing", label: "Đang đánh giá rủi ro" },
+  { status: "verifying", label: "Đang xác minh căn cứ" },
+  { status: "completed", label: "Hoàn thành" },
+] as const;
 
 export default function ContractReviewPage() {
   const searchParams = useSearchParams();
@@ -78,9 +82,11 @@ export default function ContractReviewPage() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [textContent, setTextContent] = useState("");
   const [progress, setProgress] = useState(0);
+  const [currentStatus, setCurrentStatus] = useState<AnalyzeStatus>("uploading");
   const [splitPosition, setSplitPosition] = useState(50);
   const [isDragging, setIsDragging] = useState(false);
   const [expandedClauses, setExpandedClauses] = useState<Set<string>>(new Set());
+  const [expandedMatches, setExpandedMatches] = useState<Set<string>>(new Set());
   const [clauses, setClauses] = useState<Clause[]>([]);
   const [compliance, setCompliance] = useState<ComplianceResult | null>(null);
   const [legalMatches, setLegalMatches] = useState<LegalMatch[]>([]);
@@ -93,6 +99,7 @@ export default function ContractReviewPage() {
   const [selectedDocument, setSelectedDocument] = useState<LegalDocument | null>(null);
   const [documentLoading, setDocumentLoading] = useState(false);
   const [jobHistory, setJobHistory] = useState<ContractJob[]>([]);
+  const [deletingDocumentIds, setDeletingDocumentIds] = useState<Set<string>>(new Set());
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [currentDocumentId, setCurrentDocumentId] = useState<string | null>(null);
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
@@ -137,6 +144,14 @@ export default function ContractReviewPage() {
       if (status.status === "completed") {
         await hydrateCompletedJob(status);
       } else if (status.status === "failed") {
+        setCurrentJobId(status.id);
+        setCurrentDocumentId(status.documentId || null);
+        setSourceName(status.filename || "");
+        setClauses([]);
+        setExpandedMatches(new Set());
+        setCompliance(null);
+        setLegalMatches([]);
+        setCitations([]);
         setSnapshotError(status.error || "Không thể tải kết quả rà soát trước đó.");
         setViewMode("results");
       }
@@ -184,6 +199,8 @@ export default function ContractReviewPage() {
     setSourceName(status.filename || "");
     setCurrentJobId(status.id);
     setCurrentDocumentId(status.documentId || null);
+    setCurrentStatus("completed");
+    setProgress(100);
     setSnapshotError(null);
     localStorage.setItem("lastJobId", status.id);
     setViewMode("results");
@@ -215,11 +232,13 @@ export default function ContractReviewPage() {
     setPreviewUrl(null);
     setTextContent("");
     setClauses([]);
+    setExpandedMatches(new Set());
     setCompliance(null);
     setLegalMatches([]);
     setCitations([]);
     setSourceName("");
     setProgress(0);
+    setCurrentStatus("uploading");
     setViewMode("upload");
     setHighlightedClauseId(null);
     setExpandedRisks(false);
@@ -283,6 +302,8 @@ export default function ContractReviewPage() {
 
     setViewMode("analyzing");
     setProgress(0);
+    setCurrentStatus("uploading");
+    setSnapshotError(null);
 
     try {
       let jobId: string;
@@ -308,6 +329,7 @@ export default function ContractReviewPage() {
         try {
           const status = await contractApi.getJobStatus(jobId);
           setProgress(status.progress);
+          setCurrentStatus(status.status);
 
           if (status.status === "completed") {
             clearInterval(pollInterval);
@@ -316,8 +338,16 @@ export default function ContractReviewPage() {
             notifyContractHistoryChanged();
           } else if (status.status === "failed") {
             clearInterval(pollInterval);
-            alert(status.error || "Phân tích thất bại. Vui lòng thử lại.");
-            setViewMode("preview");
+            setSnapshotError(status.error || "Phân tích thất bại. Vui lòng thử lại.");
+            setClauses([]);
+            setExpandedMatches(new Set());
+            setCompliance(null);
+            setLegalMatches([]);
+            setCitations([]);
+            setSourceName(status.filename || sourceName);
+            setViewMode("results");
+            loadJobHistory();
+            notifyContractHistoryChanged();
           }
         } catch (err) {
           console.error("Poll error:", err);
@@ -359,6 +389,14 @@ export default function ContractReviewPage() {
 
   const toggleClause = (id: string) => {
     setExpandedClauses((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleMatch = (id: string) => {
+    setExpandedMatches((prev) => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
@@ -422,20 +460,34 @@ export default function ContractReviewPage() {
   };
 
   const handleDeleteDocument = async (documentId: string) => {
+    if (deletingDocumentIds.has(documentId)) return;
+
+    const previousHistory = jobHistory;
+    setDeletingDocumentIds((prev) => new Set(prev).add(documentId));
+    setJobHistory((prev) => prev.filter((job) => job.documentId !== documentId));
+    notifyContractHistoryChanged();
+    if (currentDocumentId === documentId) {
+      resetToUpload();
+    }
+
     try {
       await contractApi.deleteDocument(documentId);
-      setJobHistory((prev) => prev.filter((job) => job.documentId !== documentId));
-      notifyContractHistoryChanged();
-      if (currentDocumentId === documentId) {
-        resetToUpload();
-      }
     } catch (err) {
       console.error("Failed to delete contract document:", err);
+      setJobHistory(previousHistory);
       alert("Không thể xóa tài liệu lúc này.");
+    } finally {
+      setDeletingDocumentIds((prev) => {
+        const next = new Set(prev);
+        next.delete(documentId);
+        return next;
+      });
     }
   };
 
-  const currentStep = analyzeSteps.find((s) => progress < s.threshold) || analyzeSteps[analyzeSteps.length - 1];
+  const currentStepIndex = Math.max(0, analyzeSteps.findIndex((s) => s.status === currentStatus));
+  const currentStep = analyzeSteps[currentStepIndex] || analyzeSteps[0];
+  const safeProgress = Math.max(0, Math.min(progress, 100));
 
   return (
     <div className="h-[calc(100vh-8rem)] flex flex-col">
@@ -578,19 +630,19 @@ export default function ContractReviewPage() {
               <motion.div
                 className="h-5 bg-gradient-to-r from-secondary to-accent"
                 style={{ borderRadius: "10px" }}
-                animate={{ width: `${Math.min(progress, 100)}%` }}
+                animate={{ width: `${safeProgress}%` }}
                 transition={{ duration: 0.2 }}
               />
             </div>
             <div className="flex justify-between items-center mb-8">
-              <span className="font-body text-lg text-fg">{Math.round(Math.min(progress, 100))}%</span>
+              <span className="font-body text-lg text-fg">{Math.round(safeProgress)}%</span>
               <span className="font-body text-sm text-fg/60">{currentStep.label}</span>
             </div>
 
             <div className="space-y-3 text-left">
               {analyzeSteps.map((step, i) => {
-                const isDone = progress >= step.threshold;
-                const isActive = progress >= (i > 0 ? analyzeSteps[i - 1].threshold : 0) && progress < step.threshold;
+                const isDone = currentStatus === "completed" || i < currentStepIndex;
+                const isActive = i === currentStepIndex && currentStatus !== "completed";
                 return (
                   <div key={step.label} className="flex items-center gap-3">
                     <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-colors ${
@@ -637,7 +689,8 @@ export default function ContractReviewPage() {
                   </div>
                   {job.documentId && (
                     <button
-                      className="p-2 text-fg/40 hover:text-accent transition-colors"
+                      className="p-2 text-fg/40 hover:text-accent transition-colors disabled:opacity-40"
+                      disabled={deletingDocumentIds.has(job.documentId)}
                       onClick={(e) => {
                         e.stopPropagation();
                         void handleDeleteDocument(job.documentId!);
@@ -854,21 +907,45 @@ export default function ContractReviewPage() {
                                       <CheckCircle className="w-3 h-3" /> Gợi ý & Căn cứ pháp lý
                                     </h5>
                                     <div className="space-y-2">
-                                      {matches.map((match) => (
-                                        <div key={match.uid} className="bg-white/70 border border-fg/10 p-2" style={{ borderRadius: "30px 4px 25px 4px / 4px 25px 4px 30px" }}>
-                                          <div className="flex items-start gap-2">
-                                            <WobblyBadge variant="secondary" className="mt-0.5 whitespace-nowrap">{match.segmentType}</WobblyBadge>
-                                            <div className="flex-1 min-w-0">
-                                              <span className="font-body font-semibold text-xs text-fg block truncate" title={match.citation}>{match.citation}</span>
-                                              <p className="font-body text-xs text-fg/70 mt-1 line-clamp-2" title={match.text}>{match.text}</p>
+                                      {matches.map((match) => {
+                                        const matchKey = `${clause.id}:${match.uid}`;
+                                        const isMatchExpanded = expandedMatches.has(matchKey);
+                                        const matchText = match.text?.trim();
+
+                                        return (
+                                          <button
+                                            key={matchKey}
+                                            type="button"
+                                            className="w-full text-left bg-white/70 border border-fg/10 p-2 hover:bg-white transition-colors"
+                                            style={{ borderRadius: "30px 4px 25px 4px / 4px 25px 4px 30px" }}
+                                            onClick={() => toggleMatch(matchKey)}
+                                          >
+                                            <div className="flex items-start gap-2">
+                                              <WobblyBadge variant="secondary" className="mt-0.5 whitespace-nowrap">{match.segmentType}</WobblyBadge>
+                                              <div className="flex-1 min-w-0">
+                                                <span className="font-body font-semibold text-xs text-fg block truncate" title={match.citation}>{match.citation}</span>
+                                              </div>
+                                              {isMatchExpanded ? <ChevronDown className="w-4 h-4 text-fg/40 flex-shrink-0" /> : <ChevronRight className="w-4 h-4 text-fg/40 flex-shrink-0" />}
                                             </div>
-                                          </div>
-                                          <div className="mt-1.5 flex items-center gap-2 font-body text-[10px] text-fg/40 uppercase tracking-wider">
-                                            <span>Độ khớp: {(match.score * 100).toFixed(1)}%</span>
-                                            {match.validitySignal !== "latest_known" && <span>• {match.validitySignal}</span>}
-                                          </div>
-                                        </div>
-                                      ))}
+
+                                            <AnimatePresence initial={false}>
+                                              {isMatchExpanded && (
+                                                <motion.div
+                                                  className="mt-2 border-t border-fg/10 pt-2 font-body text-xs text-fg/70 leading-relaxed whitespace-pre-wrap"
+                                                  initial={{ height: 0, opacity: 0 }}
+                                                  animate={{ height: "auto", opacity: 1 }}
+                                                  exit={{ height: 0, opacity: 0 }}
+                                                >
+                                                  {matchText || "Snapshot cũ chưa có nội dung điều luật. Chạy rà soát lại để tải nội dung thật từ Neo4j."}
+                                                  {match.validitySignal !== "latest_known" && (
+                                                    <div className="mt-2 text-[10px] uppercase tracking-wider text-fg/40">{match.validitySignal}</div>
+                                                  )}
+                                                </motion.div>
+                                              )}
+                                            </AnimatePresence>
+                                          </button>
+                                        );
+                                      })}
                                     </div>
                                   </div>
                                 )}

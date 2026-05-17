@@ -12,6 +12,7 @@ export interface ChatChunk {
   conversationId?: string;
   intents?: IntentResult[];
   provisions?: Provision[];
+  citations?: Citation[];
   done?: boolean;
 }
 
@@ -50,6 +51,7 @@ export async function sendMessage(
   let fullContent = "";
   let intents: IntentResult[] = [];
   let provisions: Provision[] = [];
+  let citations: Citation[] = [];
   let createdConversationId = conversationId || "";
 
   await apiSSE<ChatChunk>(
@@ -72,6 +74,9 @@ export async function sendMessage(
         provisions = chunk.provisions;
         onMetadata?.({ provisions });
       }
+      if (chunk.citations) {
+        citations = chunk.citations;
+      }
     }
   );
 
@@ -83,6 +88,7 @@ export async function sendMessage(
       content: fullContent,
       intents,
       provisions,
+      citations,
       timestamp: new Date().toISOString(),
     },
   };

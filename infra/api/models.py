@@ -94,7 +94,9 @@ class LegalMatchResponse(BaseModel):
     citation: str
     documentTitle: str = ""
     segmentType: str = ""
+    text: str = ""
     score: float = 0.0
+    rankingScore: float = 0.0
     validitySignal: str = "latest_known"
     scoreFactors: dict = {}
 

@@ -43,6 +43,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const [showQaHistory, setShowQaHistory] = useState(true);
   const [contractJobs, setContractJobs] = useState<ContractJob[]>([]);
   const [qaConversations, setQaConversations] = useState<Conversation[]>([]);
+  const [deletingContractIds, setDeletingContractIds] = useState<Set<string>>(new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const { showLogoutConfirm } = useLogoutConfirm();
@@ -115,12 +116,24 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
   const deleteContractDocument = async (job: ContractJob) => {
     if (!job.documentId) return;
+    if (deletingContractIds.has(job.documentId)) return;
+
+    const previousJobs = contractJobs;
+    setDeletingContractIds((prev) => new Set(prev).add(job.documentId!));
+    setContractJobs((prev) => prev.filter((item) => item.documentId !== job.documentId));
+    window.dispatchEvent(new Event("contract-review:history-changed"));
+
     try {
       await contractApi.deleteDocument(job.documentId);
-      await loadContractHistory();
-      window.dispatchEvent(new Event("contract-review:history-changed"));
     } catch (error) {
       console.error("Could not delete contract document:", error);
+      setContractJobs(previousJobs);
+    } finally {
+      setDeletingContractIds((prev) => {
+        const next = new Set(prev);
+        next.delete(job.documentId!);
+        return next;
+      });
     }
   };
 
@@ -143,7 +156,16 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                 <span className="block truncate">{job.filename}</span>
               </Link>
               {job.documentId && (
-                <button onClick={() => deleteContractDocument(job)} className="shrink-0 text-fg/60 hover:text-red-600" aria-label="Xóa">
+                <button
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    void deleteContractDocument(job);
+                  }}
+                  disabled={deletingContractIds.has(job.documentId)}
+                  className="shrink-0 text-fg/60 hover:text-red-600 disabled:opacity-40"
+                  aria-label="Xóa"
+                >
                   <Trash2 className="w-4 h-4" />
                 </button>
               )}
