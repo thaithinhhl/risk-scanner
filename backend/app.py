@@ -17,7 +17,15 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "https://a20-app-104.site",
+        "https://104-fe.vercel.app",
+        # HuggingFace Spaces preview domains
+        "https://*.hf.space",
+    ],
+    allow_origin_regex=r"https://.*\.hf\.space",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
