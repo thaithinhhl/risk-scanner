@@ -3,7 +3,11 @@ import { SignJWT } from "jose";
 import { auth } from "@/auth";
 
 async function createBackendAccessToken(userId: string, email: string, role: string): Promise<string> {
-  const secret = new TextEncoder().encode(process.env.AUTH_SECRET || "default-secret-change-in-production");
+  const secret = new TextEncoder().encode(
+    process.env.BACKEND_AUTH_SECRET || 
+    process.env.AUTH_SECRET || 
+    "default-secret-change-in-production"
+  );
   return new SignJWT({ email, role })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(userId)

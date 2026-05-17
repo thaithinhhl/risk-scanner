@@ -15,7 +15,7 @@ from jose import jwt, JWTError, ExpiredSignatureError
 from src.config import _env
 
 # Shared secret with Next.js Auth.js
-AUTH_SECRET = _env("AUTH_SECRET", "")
+AUTH_SECRET = _env("BACKEND_AUTH_SECRET", _env("AUTH_SECRET", ""))
 
 security = HTTPBearer()
 

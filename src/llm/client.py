@@ -28,10 +28,14 @@ RETRY_BACKOFF = 2.0  # exponential backoff multiplier
 RETRYABLE_ERRORS = (
     "rate_limit",
     "timeout",
+    "timed out",
+    "timedout",
     "connection",
     "503",
     "502",
     "500",
+    "rate",
+    "busy",
 )
 
 
@@ -98,7 +102,7 @@ class OpenAIClient(LLMClient):
         if self._client is None:
             from openai import AsyncOpenAI
             base_url = os.getenv("OPENAI_BASE_URL", "") or "https://api.openai.com/v1"
-            self._client = AsyncOpenAI(api_key=self._api_key, base_url=base_url)
+            self._client = AsyncOpenAI(api_key=self._api_key, base_url=base_url, timeout=120.0)
         return self._client
 
     async def chat(

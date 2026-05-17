@@ -55,7 +55,8 @@ async def upload_contract(
 
     try:
         store = get_contract_store()
-        storage_path = store.upload_file(
+        storage_path = await asyncio.to_thread(
+            store.upload_file,
             user_id=user.id,
             document_id=document_id,
             version_number=1,
@@ -63,13 +64,15 @@ async def upload_contract(
             content=content,
             content_type=file.content_type,
         )
-        document = store.create_document(
+        document = await asyncio.to_thread(
+            store.create_document,
             user_id=user.id,
             original_filename=file.filename or "unknown",
             display_name=file.filename or "unknown",
             document_id=document_id,
         )
-        version = store.create_version(
+        version = await asyncio.to_thread(
+            store.create_version,
             document_id=document["id"],
             user_id=user.id,
             filename=file.filename or "unknown",
@@ -81,7 +84,8 @@ async def upload_contract(
             source_format=infer_source_format(file.filename or "", file.content_type),
             version_id=version_id,
         )
-        run = store.create_run(
+        run = await asyncio.to_thread(
+            store.create_run,
             document_id=document["id"],
             version_id=version["id"],
             user_id=user.id,
@@ -112,7 +116,7 @@ async def get_job_status(job_id: str, user: CurrentUser = Depends(get_current_us
     """Get persisted status of a contract review run."""
     try:
         store = get_contract_store()
-        bundle = store.get_run_bundle(job_id, user.id)
+        bundle = await asyncio.to_thread(store.get_run_bundle, job_id, user.id)
     except ContractStoreError as exc:
         logger.error("Could not load contract run %s: %s", job_id, exc)
         raise HTTPException(status_code=500, detail="Could not load contract review run") from exc
@@ -126,7 +130,7 @@ async def get_job_status(job_id: str, user: CurrentUser = Depends(get_current_us
     snapshot_result = snapshot.get("result_json") if snapshot else {}
     file_url = None
     try:
-        file_url = store.create_signed_file_url(version.get("storage_path", ""))
+        file_url = await asyncio.to_thread(store.create_signed_file_url, version.get("storage_path", ""))
     except ContractStoreError:
         logger.warning("Could not create signed URL for contract run %s", job_id)
 
@@ -143,7 +147,7 @@ async def get_job_history(user: CurrentUser = Depends(get_current_user)):
     """Get persisted contract review runs for the current user."""
     try:
         store = get_contract_store()
-        bundles = store.list_runs(user.id)
+        bundles = await asyncio.to_thread(store.list_runs, user.id)
     except ContractStoreError as exc:
         logger.error("Could not list contract runs: %s", exc)
         raise HTTPException(status_code=500, detail="Could not load contract review history") from exc
@@ -159,7 +163,7 @@ async def delete_contract_document(document_id: str, user: CurrentUser = Depends
     """Soft-delete a persisted contract document."""
     try:
         store = get_contract_store()
-        store.soft_delete_document(document_id, user.id)
+        await asyncio.to_thread(store.soft_delete_document, document_id, user.id)
     except ContractStoreError as exc:
         if "not found" in str(exc).lower():
             raise HTTPException(status_code=404, detail="Document not found") from exc
@@ -261,7 +265,7 @@ async def process_contract(
 
     async def report_progress(status: str, progress: int) -> None:
         progress_state["value"] = max(progress_state["value"], max(0, min(100, progress)))
-        store.update_run(run_id=run_id, user_id=user_id, status=status, progress=progress_state["value"])
+        await asyncio.to_thread(store.update_run, run_id=run_id, user_id=user_id, status=status, progress=progress_state["value"])
 
     try:
         if os.getenv("CONTRACT_REVIEW_USE_MOCK", "").lower() in {"1", "true", "yes"}:
@@ -277,19 +281,19 @@ async def process_contract(
         pipeline = ContractReviewPipeline(progress_callback=report_progress)
         result = await pipeline.review_file(tmp_path)
         payload = serialize_review_result(result)
-        store.save_snapshot(run_id=run_id, user_id=user_id, result_json=payload)
-        store.update_run(run_id=run_id, user_id=user_id, status="completed", progress=100, completed=True, error=None)
+        await asyncio.to_thread(store.save_snapshot, run_id=run_id, user_id=user_id, result_json=payload)
+        await asyncio.to_thread(store.update_run, run_id=run_id, user_id=user_id, status="completed", progress=100, completed=True, error=None)
     except ContractReviewPipelineError as exc:
         logger.error("Run %s failed at %s: %s", run_id, exc.stage, exc)
         try:
             failed_progress = 100 if exc.stage == "guardrail" else progress_state["value"]
-            store.update_run(run_id=run_id, user_id=user_id, status="failed", progress=failed_progress, error=str(exc), completed=True)
+            await asyncio.to_thread(store.update_run, run_id=run_id, user_id=user_id, status="failed", progress=failed_progress, error=str(exc), completed=True)
         except ContractStoreError:
             logger.exception("Could not persist failed status for run %s", run_id)
     except Exception as exc:  # noqa: BLE001
         logger.error("Run %s failed: %s", run_id, exc)
         try:
-            store.update_run(run_id=run_id, user_id=user_id, status="failed", progress=progress_state["value"], error=str(exc), completed=True)
+            await asyncio.to_thread(store.update_run, run_id=run_id, user_id=user_id, status="failed", progress=progress_state["value"], error=str(exc), completed=True)
         except ContractStoreError:
             logger.exception("Could not persist failed status for run %s", run_id)
 

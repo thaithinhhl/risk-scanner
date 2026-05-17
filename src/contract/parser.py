@@ -247,7 +247,7 @@ class ContractParser:
 
         image_b64 = base64.b64encode(image_bytes).decode("ascii")
         base_url = (os.getenv("OPENAI_BASE_URL") or "").strip() or "https://api.openai.com/v1"
-        client = OpenAI(api_key=api_key, base_url=base_url)
+        client = OpenAI(api_key=api_key, base_url=base_url, timeout=120.0)
         response = client.chat.completions.create(
             model=OPENAI_OCR_MODEL,
             messages=[

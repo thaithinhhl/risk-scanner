@@ -36,3 +36,5 @@ luat_lao_dong_schema.json
 luocdo.html
 .codex/*
 .env.local.old
+.vercel
+.env*.local
