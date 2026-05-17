@@ -56,10 +56,11 @@ def decode_token(token: str) -> dict:
             detail="Token has expired",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    except JWTError:
+    except JWTError as e:
+        print(f"JWT Decode failed! Error: {e}, Secret length: {len(AUTH_SECRET)}, Token starts with: {token[:15]}...")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token",
+            detail=f"Invalid token: {e}",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
