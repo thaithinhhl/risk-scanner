@@ -1,3 +1,13 @@
+---
+title: Risk Scanner BE App
+emoji: 🚀
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+pinned: false
+app_port: 7860
+---
+
 # Chạy lần đầu
 
 python -m src.data_pipeline.full_ingest_neo4j
