@@ -160,7 +160,7 @@ const config: NextAuthConfig = {
 
   session: {
     strategy: "jwt",
-    maxAge: 15 * 60,
+    maxAge: 7 * 24 * 60 * 60, // 7 days
   },
 
   callbacks: {

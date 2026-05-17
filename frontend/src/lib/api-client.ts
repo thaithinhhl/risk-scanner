@@ -53,7 +53,6 @@ export async function apiUpload<T>(
     });
 
     if (response.status === 401) {
-      window.location.href = "/login?callbackUrl=" + encodeURIComponent(window.location.pathname);
       throw { message: "Unauthorized", status: 401 } as ApiError;
     }
 
@@ -106,7 +105,6 @@ export async function apiRequest<T>(
       clearTimeout(timeoutId);
 
       if (response.status === 401) {
-        window.location.href = "/login?callbackUrl=" + encodeURIComponent(window.location.pathname);
         throw { message: "Unauthorized", status: 401 } as ApiError;
       }
 
@@ -153,7 +151,6 @@ export async function apiSSE<T>(
   });
 
   if (response.status === 401) {
-    window.location.href = "/login?callbackUrl=" + encodeURIComponent(window.location.pathname);
     throw { message: "Unauthorized", status: 401 } as ApiError;
   }
 
