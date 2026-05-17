@@ -13,7 +13,7 @@ from typing import Any, Optional
 
 from neo4j import GraphDatabase
 
-from src.config import NEO4J_TIMEOUT, NEO4J_URI, neo4j_auth
+from src.config import NEO4J_TIMEOUT, NEO4J_DATABASE, NEO4J_URI, neo4j_auth
 from src.config import EMBED_QUERY_INSTRUCTION
 from src.contract.mock_bridge import EmbeddingService, create_embedding_service
 from src.contract.query_rewriter import LegalRetrievalPlan
@@ -128,7 +128,7 @@ class LegalHybridRetriever:
         RETURN node, labels(node) AS labels, score
         ORDER BY score DESC
         """
-        with self._driver.session(default_access_mode="READ", database="neo4j") as session:
+        with self._driver.session(default_access_mode="READ", database=NEO4J_DATABASE) as session:
             for embedding in embeddings:
                 try:
                     rows = session.run(
@@ -168,7 +168,7 @@ class LegalHybridRetriever:
         RETURN node, labels(node) AS labels, score
         ORDER BY score DESC
         """
-        with self._driver.session(default_access_mode="READ", database="neo4j") as session:
+        with self._driver.session(default_access_mode="READ", database=NEO4J_DATABASE) as session:
             rows = session.run(
                 cypher,
                 top_k=self._top_k,
@@ -197,7 +197,7 @@ class LegalHybridRetriever:
         RETURN node, labels(node) AS labels, score
         ORDER BY score DESC
         """
-        with self._driver.session(default_access_mode="READ", database="neo4j") as session:
+        with self._driver.session(default_access_mode="READ", database=NEO4J_DATABASE) as session:
             try:
                 rows = session.run(
                     cypher,
@@ -231,7 +231,7 @@ class LegalHybridRetriever:
                coalesce(props.ref_type, props.raw_type, props.action, rel_type) AS rel_detail
         LIMIT $limit
         """
-        with self._driver.session(default_access_mode="READ", database="neo4j") as session:
+        with self._driver.session(default_access_mode="READ", database=NEO4J_DATABASE) as session:
             rows = list(session.run(cypher, uids=seed_uids, limit=self._top_k))
 
         hydrated = self._hydrate_nodes(
@@ -281,7 +281,7 @@ class LegalHybridRetriever:
         RETURN row, node, labels(node) AS labels, doc, article, clause
         ORDER BY row.idx
         """
-        with self._driver.session(default_access_mode="READ", database="neo4j") as session:
+        with self._driver.session(default_access_mode="READ", database=NEO4J_DATABASE) as session:
             records = list(session.run(cypher, rows=node_rows))
 
         candidates: list[LegalCandidate] = []

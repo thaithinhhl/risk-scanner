@@ -219,7 +219,7 @@ class LegalMatcher:
         RETURN article, doc, score
         ORDER BY score DESC
         """
-        with self._driver.session(default_access_mode="READ", database="neo4j") as session:
+        with self._driver.session(default_access_mode="READ", database=NEO4J_DATABASE) as session:
             result = session.run(cypher, vector=query_vector, top_k=self._top_k, config={"maxTransactionRetryTime": NEO4J_TIMEOUT * 1000})
             provisions = []
             for record in result:
@@ -250,7 +250,7 @@ class LegalMatcher:
         RETURN article, doc, score
         ORDER BY score DESC
         """
-        with self._driver.session(default_access_mode="READ", database="neo4j") as session:
+        with self._driver.session(default_access_mode="READ", database=NEO4J_DATABASE) as session:
             result = session.run(cypher, text=text, top_k=self._top_k, config={"maxTransactionRetryTime": NEO4J_TIMEOUT * 1000})
             provisions = []
             for record in result:

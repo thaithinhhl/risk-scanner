@@ -18,7 +18,7 @@ from typing import Any, Optional
 
 from neo4j import GraphDatabase
 
-from src.config import NEO4J_URI, NEO4J_TIMEOUT, neo4j_auth
+from src.config import NEO4J_DATABASE, NEO4J_URI, NEO4J_TIMEOUT, NEO4J_DATABASE, neo4j_auth
 from src.contract.citations import LegalCitation
 
 
@@ -241,7 +241,7 @@ class CitationVerifier:
                doc.title AS document_title,
                coalesce(node.is_current, article.is_current, true) AS is_current
         """
-        with self._driver.session(default_access_mode="READ", database="neo4j") as session:
+        with self._driver.session(default_access_mode="READ", database=NEO4J_DATABASE) as session:
             record = session.run(
                 cypher,
                 uid=uid,
@@ -293,7 +293,7 @@ class CitationVerifier:
             params = {"article_index": parsed.article_number}
 
         try:
-            with self._driver.session(default_access_mode="READ", database="neo4j") as session:
+            with self._driver.session(default_access_mode="READ", database=NEO4J_DATABASE) as session:
                 result = session.run(cypher, params, config={"maxTransactionRetryTime": NEO4J_TIMEOUT * 1000})
                 record = result.single()
 

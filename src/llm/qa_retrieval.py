@@ -10,7 +10,7 @@ from typing import Any, Optional, Protocol
 
 from neo4j import GraphDatabase
 
-from src.config import LOOKUP_PATH, NEO4J_TIMEOUT, NEO4J_URI, neo4j_auth
+from src.config import LOOKUP_PATH, NEO4J_TIMEOUT, NEO4J_DATABASE, NEO4J_URI, neo4j_auth
 from src.contract.hybrid_retriever import LegalCandidate, LegalHybridRetriever
 from src.contract.query_rewriter import LegalRetrievalPlan
 from src.llm.client import LLMClient, create_client
@@ -263,7 +263,7 @@ class QARetrievalService:
             "MATCH Document by id/so_ky_hieu/title; resolve Article by HAS_ARTICLE, HAS_CHAPTER/HAS_ARTICLE, or uid doc_{doc_id}_dieu_{article}; then HAS_CLAUSE/HAS_POINT",
         )
 
-        with driver.session(default_access_mode="READ", database="neo4j") as session:
+        with driver.session(default_access_mode="READ", database=NEO4J_DATABASE) as session:
             rows = list(
                 session.run(
                     cypher,

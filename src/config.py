@@ -81,6 +81,7 @@ def _env_bool(key: str, default: bool = False) -> bool:
 NEO4J_URI: str = _env("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USER: str = _env("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD: str = _env("NEO4J_PASSWORD", "password")
+NEO4J_DATABASE: str = _env("NEO4J_DATABASE", "neo4j")
 NEO4J_TIMEOUT: int = _env_int("NEO4J_TIMEOUT", 30)  # seconds
 
 # Neo4j memory config (for docker-compose / self-hosted)

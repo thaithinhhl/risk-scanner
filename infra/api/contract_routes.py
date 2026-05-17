@@ -26,7 +26,7 @@ from infra.api.models import (
     UploadResponse,
 )
 from src.auth import CurrentUser, get_current_user
-from src.config import NEO4J_URI, neo4j_auth
+from src.config import NEO4J_DATABASE, NEO4J_URI, NEO4J_DATABASE, neo4j_auth
 from src.contract.parser import repair_mojibake_text
 from src.contract.review_pipeline import ContractReviewPipeline, ContractReviewPipelineError
 
@@ -177,7 +177,7 @@ async def get_document_content(doc_title: str):
     """Get full content of a legal document by title."""
     driver = GraphDatabase.driver(NEO4J_URI, auth=neo4j_auth())
     try:
-        with driver.session(default_access_mode="READ", database="neo4j") as session:
+        with driver.session(default_access_mode="READ", database=NEO4J_DATABASE) as session:
             result = session.run(
                 """
                 MATCH (doc:Document)
