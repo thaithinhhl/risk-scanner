@@ -34,8 +34,12 @@ import logging
 import os
 from pathlib import Path
 from typing import Optional
+from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
+
+# Load environment variables from .env
+load_dotenv()
 
 # ---------------------------------------------------------------------------
 # Neo4j credentials (from environment variables, with fallback to defaults)

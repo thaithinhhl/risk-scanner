@@ -1,8 +1,12 @@
 services:
-  # ── Neo4j Graph Database ───────────────────────────────────────────────────
+  # ── 1. Neo4j Graph Database ────────────────────────────────────────────────
   neo4j:
     image: neo4j:5.15-community
     container_name: legal-neo4j
+    hostname: neo4j
+    extra_hosts:
+      - "neo4j:127.0.0.1"
+      - "legal-neo4j:127.0.0.1"
     ports:
       - "7474:7474"   # Web UI
       - "7687:7687"   # Bolt protocol
@@ -10,13 +14,10 @@ services:
       - neo4j_data:/data
       - neo4j_logs:/logs
     environment:
-      # Auth
       - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-password}
-      # Memory (Neo4j 5.x config keys)
       - NEO4J_dbms_memory_heap_initial__size=${NEO4J_HEAP_INITIAL_SIZE:-512M}
       - NEO4J_dbms_memory_heap_max__size=${NEO4J_HEAP_SIZE:-2G}
       - NEO4J_dbms_memory_pagecache_size=${NEO4J_PAGE_CACHE:-1G}
-      # Plugins & Security
       - NEO4J_PLUGINS=["apoc"]
       - NEO4J_dbms_security_procedures_unrestricted=apoc.*
       - NEO4J_dbms_security_procedures_allowlist=apoc.*
@@ -25,25 +26,51 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
 
-  # ── Embedding Service (T6.2) ───────────────────────────────────────────────
-  # Uncomment if you have GPU or want to run embedding service in Docker
-  # embedding:
-  #   build: ./infra/embedding_service
-  #   container_name: legal-embed
-  #   ports:
-  #     - "${EMBED_PORT:-8001}:${EMBED_PORT:-8001}"
-  #   environment:
-  #     - EMBED_MODEL=${EMBED_MODEL:-mainguyen9/vietlegal-harrier-0.6b}
-  #     - EMBED_BATCH_SIZE=${EMBED_BATCH_SIZE:-512}
-  #     - EMBED_MAX_TEXTS=${EMBED_MAX_TEXTS:-1000}
-  #   deploy:
-  #     resources:
-  #       reservations:
-  #         devices:
-  #           - driver: nvidia
-  #             count: 1
-  #             capabilities: [gpu]
+  # ── 2. Embedding Service ───────────────────────────────────────────────────
+  embedding:
+    build: ./infra/embedding_service
+    container_name: legal-embed
+    ports:
+      - "${EMBED_PORT:-8001}:8080" # Map host 8001 to container 8080
+    environment:
+      - EMBED_MODEL=${EMBED_MODEL:-mainguyen9/vietlegal-harrier-0.6b}
+      - EMBED_BATCH_SIZE=${EMBED_BATCH_SIZE:-512}
+    restart: unless-stopped
+
+  # ── 3. Backend API (FastAPI) ───────────────────────────────────────────────
+  api:
+    build: .
+    container_name: legal-backend-api
+    ports:
+      - "8000:8000"
+    environment:
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=${NEO4J_USER:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-password}
+      - EMBED_SERVICE_URL=http://embedding:8080
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+    depends_on:
+      - neo4j
+      - embedding
+    restart: unless-stopped
+
+  # ── 4. Admin Portal (Streamlit) ────────────────────────────────────────────
+  admin:
+    build: .
+    container_name: legal-admin-portal
+    command: ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+    ports:
+      - "8501:8501"
+    environment:
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=${NEO4J_USER:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-password}
+    depends_on:
+      - neo4j
+    restart: unless-stopped
 
 volumes:
   neo4j_data:
