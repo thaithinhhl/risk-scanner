@@ -147,13 +147,22 @@ export function AuthSyncProvider({ children }: AuthSyncProviderProps) {
     };
   }, [handleEvent]);
 
-  // Periodic session check
+  // Periodic session check — only on protected pages
   useEffect(() => {
+    const publicPaths = ["/", "/login", "/register", "/forgot-password",
+      "/verify-email", "/verify-otp", "/verify-request", "/auth-error", "/reset-password"];
+
     const interval = setInterval(async () => {
+      // Skip check on public pages (user is not expected to be logged in)
+      if (publicPaths.some((p) => pathname === p || pathname.startsWith(p + "/"))) return;
+
       try {
         const res = await fetch("/api/auth/session", { cache: "no-store" });
-        if (!res.ok) {
-          broadcastSessionExpired();
+        if (res.ok) {
+          const session = await res.json();
+          if (!session?.user) {
+            broadcastSessionExpired();
+          }
         }
       } catch {
         // Network error, ignore
@@ -161,7 +170,7 @@ export function AuthSyncProvider({ children }: AuthSyncProviderProps) {
     }, SESSION_CHECK_INTERVAL);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [pathname]);
 
   // Check session on mount: if logged in and on public page, redirect to dashboard
   useEffect(() => {
